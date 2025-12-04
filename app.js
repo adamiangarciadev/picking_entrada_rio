@@ -1,4 +1,4 @@
-/* app.js — Recepción de mercadería, 2 CSV, match normalizado, nombre con BULTOS, y UN SOLO TXT con TODOS los códigos */
+/* app.js — Recepción de mercadería, 2 CSV, match normalizado, SOLO guarda en Drive y botón reset */
 ;(() => {
   "use strict";
 
@@ -7,20 +7,14 @@
   const SUCURSALES  = ["AV2","NAZCA","LAMARCA","CORRIENTES","CO2","CASTELLI","QUILMES","MORENO","SARMIENTO","DEPOSITO","PUEYRREDON"];
   const CSV_FILES   = ["equivalencia.csv", "equivalencia2.csv"]; // ambos si existen
 
-  // Nuevo key de LocalStorage para RECEPCIÓN
   const LS_META  = "recepcion_meta_v1";
 
   const AUTOCOMMIT_IDLE_MS = 80;
   const MIN_LEN_FOR_COMMIT = 3;
 
   // ====== URLs de Apps Script por SUCURSAL (entrada) ======
-  // SARMIENTO
   const SCRIPT_URL_SARMIENTO = "https://script.google.com/macros/s/AKfycbzpGGyA_acQYDzZldHnameD5Xwo8hGW6-eaFjAlDZfljsuU5tqkeCb8Nizk_e2CitDU/exec";
-
-  // AV2
-  const SCRIPT_URL_AV2 = "https://script.google.com/macros/s/AKfycbwPNl9zyKtgun43MijeiFL3BtGTyM79_a4pocTYlYOr9Q5KllWra6s2HjbGIr11XFGy9w/exec";
-
-  // PUEYRREDON
+  const SCRIPT_URL_AV2       = "https://script.google.com/macros/s/AKfycbwPNl9zyKtgun43MijeiFL3BtGTyM79_a4pocTYlYOr9Q5KllWra6s2HjbGIr11XFGy9w/exec";
   const SCRIPT_URL_PUEYRREDON = "https://script.google.com/macros/s/AKfycbxKRHA79kv30UEjOU_eeehr8evuVPhqDFfSaanJgeJPgUSEZao5eLqsTyO73CdLvgZE/exec";
 
   // ====== Estado ======
@@ -36,18 +30,21 @@
     readyPill: $("#readyPill"),
     pillText:  $("#pillText"),
 
-    // NUEVOS SELECTS / INPUTS PARA RECEPCIÓN
-    respOrigenSelect:     $("#respOrigenSelect"),
-    remitoOrigenInput:    $("#remitoOrigenInput"),
-    respEntradaSelect:    $("#respEntradaSelect"),
-    sucursalEntradaSelect:$("#sucursalEntradaSelect"),
-    bultosInput:          $("#bultosInput"),
+    // Campos recepción
+    respOrigenSelect:      $("#respOrigenSelect"),
+    remitoOrigenInput:     $("#remitoOrigenInput"),
+    respEntradaSelect:     $("#respEntradaSelect"),
+    sucursalEntradaSelect: $("#sucursalEntradaSelect"),
+    bultosInput:           $("#bultosInput"),
 
     scanInput:  $("#scanInput"),
     scanCount:  $("#scanCount"),
     noti:       $("#noti"),
     lastScans:  $("#lastScans"),
-    downloadBtn:$("#downloadBtn"),
+
+    // Botones
+    saveBtn:   $("#saveBtn"),
+    resetBtn:  $("#resetBtn"),
   };
 
   // ====== Init ======
@@ -75,17 +72,24 @@
       });
       el.scanInput.addEventListener("input", () => { ensureAudio(); scheduleAutoCommit(); });
     }
-    if (el.downloadBtn) el.downloadBtn.addEventListener("click", downloadTxt);
+
+    // Guardar TXT SOLO en Drive
+    if (el.saveBtn) {
+      el.saveBtn.addEventListener("click", guardarEnDrive);
+    }
+
+    // Reset escaneo (volver a 0)
+    if (el.resetBtn) {
+      el.resetBtn.addEventListener("click", resetScans);
+    }
   }
 
   // ====== Selectors / LocalStorage ======
   function setupSelectors(){
-    // Cargamos listas
     fillOptions(el.respOrigenSelect, RESPONSABLES);
     fillOptions(el.respEntradaSelect, RESPONSABLES);
     fillOptions(el.sucursalEntradaSelect, SUCURSALES);
 
-    // Leer meta guardada
     const {
       respOrigen,
       remitoOrigen,
@@ -318,7 +322,7 @@
     el.lastScans.innerHTML = recent || "";
   }
 
-  // Mantener foco SOLO donde corresponde (sin robarlo a los selects/inputs)
+  // Mantener foco SOLO donde corresponde
   function keepFocus(){
     if (!el.scanInput) return;
     el.scanInput.focus();
@@ -328,9 +332,14 @@
     });
   }
 
-  // ====== TXT (UN SOLO ARCHIVO con TODOS los códigos) ======
-  function downloadTxt(){
-    // Todos los escaneos, sin filtrar, convirtiendo a código interno si existe
+  // ====== Guardar TXT SOLO en Drive ======
+  function guardarEnDrive(){
+    if (!scans.length){
+      note("No hay escaneos para guardar.");
+      flash("err");
+      return;
+    }
+
     const lines = scans.map(s => {
       const row = byCode.get(key(s.code));
       return getOutputCode(row, s.code);
@@ -338,17 +347,22 @@
 
     const content = lines.join("\n");
     const fnameBase = resolveFilename();
-
-    // 1) Descarga local
-    downloadString(content, fnameBase);
-
-    // 2) Enviar copia al Google Drive vía Apps Script según SUCURSAL DE ENTRADA
     const folderName = (el.sucursalEntradaSelect?.value || "RECEPCION").toString().toUpperCase();
+
     enviarArchivoAGoogleDrive({
       content: content,
       fileName: fnameBase,
       folderName: folderName
     });
+
+    note("Archivo enviado a Drive (revisar carpeta en unos segundos).");
+  }
+
+  // ====== Reset escaneo ======
+  function resetScans(){
+    scans = [];
+    renderLast();
+    note("Escaneos reiniciados.");
   }
 
   // Formato RECEPCIÓN:
@@ -378,7 +392,6 @@
     if (o === "AV2")         return SCRIPT_URL_AV2;
     if (o === "PUEYRREDON")  return SCRIPT_URL_PUEYRREDON;
 
-    // Si aún no hay script asignado para otros locales:
     return "";
   }
 
@@ -388,6 +401,7 @@
 
     if (!scriptUrl){
       console.warn("No hay SCRIPT_URL configurada para la sucursal de entrada:", sucursal);
+      note("No hay script configurado para esta sucursal.");
       return;
     }
 
@@ -401,7 +415,7 @@
     try {
       fetch(scriptUrl, {
         method: "POST",
-        mode: "no-cors", // no podemos leer la respuesta, pero el archivo se crea igual
+        mode: "no-cors",
         headers: {
           "Content-Type": "text/plain;charset=utf-8"
         },
@@ -415,6 +429,7 @@
       );
     } catch (err) {
       console.error("Error al enviar a Apps Script:", err);
+      note("Error al enviar a Drive (ver consola).");
     }
   }
 
@@ -424,32 +439,19 @@
   }
 
   function sanitize(s){
-    return s.replace(/[\\/:*?"<>|]+/g, "_"); // mantiene espacios/acentos
+    return s.replace(/[\\/:*?"<>|]+/g, "_");
   }
 
   function safeName(s){
     return s.normalize("NFC");
   }
 
-  function downloadString(content, fname){
-    const blob = new Blob([content], {type: "text/plain;charset=utf-8"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fname;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  // ====== CSV robusto (autodetecta ; , | \t y comillas) ======
+  // CSV robusto
   function parseCSV(text){
     const lines = text.split(/\r?\n/).filter(l => l.length>0);
     if (!lines.length) return [];
-    const sep = detectDelimiter(lines[0], lines[1]); // ; , | \t
+    const sep = detectDelimiter(lines[0], lines[1]);
     const rawHeaders = splitCSVLine(lines[0], sep);
-    // deduplicar encabezados
     const seen = {};
     const headers = rawHeaders.map(h => {
       let k = String(h || "").trim();
@@ -511,16 +513,6 @@
     }
     out.push(cur);
     return out;
-  }
-
-  // ====== Otros helpers visuales ======
-  function slug(s){
-    return (s||"").toString()
-      .normalize("NFD")
-      .replace(/\p{Diacritic}/gu,"")
-      .replace(/[^\w\-]+/g,"_")
-      .replace(/_+/g,"_")
-      .replace(/^_|_$/g,"");
   }
 
   function escapeHtml(s){
