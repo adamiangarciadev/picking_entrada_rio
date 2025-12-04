@@ -1,4 +1,4 @@
-/* app.js — 2 CSV, match normalizado, nombre con BULTOS, y UN SOLO TXT con TODOS los códigos */
+/* app.js — Recepción de mercadería, 2 CSV, match normalizado, nombre con BULTOS, y UN SOLO TXT con TODOS los códigos */
 ;(() => {
   "use strict";
 
@@ -6,16 +6,20 @@
   const RESPONSABLES = ["DAVID","DIEGO","JOEL","MARTIN","MIGUEL","NAHUEL","RODRIGO","RAMON","ROBERTO","SERGIO","PATO"];
   const SUCURSALES  = ["AV2","NAZCA","LAMARCA","CORRIENTES","CO2","CASTELLI","QUILMES","MORENO","SARMIENTO","DEPOSITO","PUEYRREDON"];
   const CSV_FILES   = ["equivalencia.csv", "equivalencia2.csv"]; // ambos si existen
-  const LS_META  = "pickeo_meta_v1";
+
+  // Nuevo key de LocalStorage para RECEPCIÓN
+  const LS_META  = "recepcion_meta_v1";
+
   const AUTOCOMMIT_IDLE_MS = 80;
   const MIN_LEN_FOR_COMMIT = 3;
 
-  // ====== URLs de Apps Script por ORIGEN ======
+  // ====== URLs de Apps Script por SUCURSAL (entrada) ======
   // SARMIENTO
   const SCRIPT_URL_SARMIENTO = "https://script.google.com/macros/s/AKfycbzpGGyA_acQYDzZldHnameD5Xwo8hGW6-eaFjAlDZfljsuU5tqkeCb8Nizk_e2CitDU/exec";
 
   // AV2
   const SCRIPT_URL_AV2 = "https://script.google.com/macros/s/AKfycbwPNl9zyKtgun43MijeiFL3BtGTyM79_a4pocTYlYOr9Q5KllWra6s2HjbGIr11XFGy9w/exec";
+
   // PUEYRREDON
   const SCRIPT_URL_PUEYRREDON = "https://script.google.com/macros/s/AKfycbxKRHA79kv30UEjOU_eeehr8evuVPhqDFfSaanJgeJPgUSEZao5eLqsTyO73CdLvgZE/exec";
 
@@ -31,16 +35,19 @@
   const el = {
     readyPill: $("#readyPill"),
     pillText:  $("#pillText"),
-    respSelect:   $("#respSelect"),
-    origenSelect: $("#origenSelect"),
-    destinoSelect:$("#destinoSelect"),
-    bultosInput:  $("#bultosInput"),
-    remitoInput:  $("#remitoInput"),
-    scanInput: $("#scanInput"),
-    scanCount: $("#scanCount"),
+
+    // NUEVOS SELECTS / INPUTS PARA RECEPCIÓN
+    respOrigenSelect:     $("#respOrigenSelect"),
+    remitoOrigenInput:    $("#remitoOrigenInput"),
+    respEntradaSelect:    $("#respEntradaSelect"),
+    sucursalEntradaSelect:$("#sucursalEntradaSelect"),
+    bultosInput:          $("#bultosInput"),
+
+    scanInput:  $("#scanInput"),
+    scanCount:  $("#scanCount"),
     noti:       $("#noti"),
     lastScans:  $("#lastScans"),
-    downloadBtn: $("#downloadBtn"),
+    downloadBtn:$("#downloadBtn"),
   };
 
   // ====== Init ======
@@ -73,52 +80,95 @@
 
   // ====== Selectors / LocalStorage ======
   function setupSelectors(){
-    fillOptions(el.respSelect, RESPONSABLES);
-    fillOptions(el.origenSelect, SUCURSALES);
-    fillOptions(el.destinoSelect, SUCURSALES);
+    // Cargamos listas
+    fillOptions(el.respOrigenSelect, RESPONSABLES);
+    fillOptions(el.respEntradaSelect, RESPONSABLES);
+    fillOptions(el.sucursalEntradaSelect, SUCURSALES);
 
-    const { responsable, origen, destino, remito, bultos } = readLocal(LS_META) || {};
-    if (responsable && RESPONSABLES.includes(responsable)) el.respSelect.value = responsable;
-    if (origen && SUCURSALES.includes(origen)) el.origenSelect.value = origen;
-    if (destino && SUCURSALES.includes(destino)) el.destinoSelect.value = destino;
-    if (typeof bultos === "string") el.bultosInput.value = bultos;
-    if (typeof remito === "string") el.remitoInput.value = remito;
+    // Leer meta guardada
+    const {
+      respOrigen,
+      remitoOrigen,
+      respEntrada,
+      sucursalEntrada,
+      bultos
+    } = readLocal(LS_META) || {};
 
-    [el.respSelect, el.origenSelect, el.destinoSelect].forEach(s => s?.addEventListener("change", saveMeta));
+    if (respOrigen && RESPONSABLES.includes(respOrigen)) {
+      el.respOrigenSelect.value = respOrigen;
+    }
+    if (respEntrada && RESPONSABLES.includes(respEntrada)) {
+      el.respEntradaSelect.value = respEntrada;
+    }
+    if (sucursalEntrada && SUCURSALES.includes(sucursalEntrada)) {
+      el.sucursalEntradaSelect.value = sucursalEntrada;
+    }
+    if (typeof bultos === "string") {
+      el.bultosInput.value = bultos;
+    }
+    if (typeof remitoOrigen === "string") {
+      el.remitoOrigenInput.value = remitoOrigen;
+    }
+
+    [el.respOrigenSelect, el.respEntradaSelect, el.sucursalEntradaSelect].forEach(s => s?.addEventListener("change", saveMeta));
+
     const digitsOnly = (e) => {
       const v = (e.target.value || "").replace(/\D+/g, "");
       if (v !== e.target.value) e.target.value = v;
       saveMeta();
     };
+
     el.bultosInput?.addEventListener("input", digitsOnly);
-    el.remitoInput?.addEventListener("input", digitsOnly);
+    el.remitoOrigenInput?.addEventListener("input", digitsOnly);
   }
 
   function saveMeta(){
     writeLocal(LS_META, {
-      responsable: el.respSelect?.value || "",
-      origen:      el.origenSelect?.value || "",
-      destino:     el.destinoSelect?.value || "",
-      bultos:      el.bultosInput?.value || "",
-      remito:      el.remitoInput?.value || "",
+      respOrigen:      el.respOrigenSelect?.value || "",
+      remitoOrigen:    el.remitoOrigenInput?.value || "",
+      respEntrada:     el.respEntradaSelect?.value || "",
+      sucursalEntrada: el.sucursalEntradaSelect?.value || "",
+      bultos:          el.bultosInput?.value || "",
     });
   }
 
-  function writeLocal(k, obj){ try{ localStorage.setItem(k, JSON.stringify(obj)); }catch{} }
-  function readLocal(k){ try{ const r = localStorage.getItem(k); return r? JSON.parse(r): null; }catch{ return null; } }
+  function writeLocal(k, obj){
+    try{
+      localStorage.setItem(k, JSON.stringify(obj));
+    }catch{}
+  }
+
+  function readLocal(k){
+    try{
+      const r = localStorage.getItem(k);
+      return r ? JSON.parse(r) : null;
+    }catch{
+      return null;
+    }
+  }
 
   function fillOptions(select, list){
     if(!select) return;
     select.innerHTML = "";
-    list.forEach(v => { const o=document.createElement("option"); o.value=v; o.textContent=v; select.appendChild(o); });
+    list.forEach(v => {
+      const o = document.createElement("option");
+      o.value = v;
+      o.textContent = v;
+      select.appendChild(o);
+    });
   }
 
   // ====== Audio ======
   function ensureAudio(){
     if (!audioCtx){
-      try{ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }catch{ audioCtx = null; }
+      try{
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }catch{
+        audioCtx = null;
+      }
     }
   }
+
   function beepError(){
     if (!audioCtx) return;
     const o = audioCtx.createOscillator();
@@ -135,7 +185,8 @@
 
   // ====== CSV Load & Index (multi-archivo) ======
   async function loadAllCSVs(list){
-    byCode.clear(); rows = [];
+    byCode.clear();
+    rows = [];
     const jobs = list.map(async (name) => {
       try{
         const res = await fetch("./" + name, { cache: "no-store" });
@@ -183,7 +234,8 @@
   }
 
   function guessCodeColumn(keys){
-    const norm = s => (s||"").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu,"");
+    const norm = s => (s||"").toLowerCase()
+      .normalize("NFD").replace(/\p{Diacritic}/gu,"");
     const patterns = [
       "codigo_barras","codigo barras","barra","barcode","ean","lectura","scan",
       "codigo","código","equivalencia","equiv","sku","cod"
@@ -200,13 +252,19 @@
     const pref = findKey(keys, ["codigo","código","sku","cod"]);
     return String((pref ? row[pref] : fallback) ?? "");
   }
+
   function findKey(keys, pats){
-    const norm = s => (s||"").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu,"");
+    const norm = s => (s||"").toLowerCase()
+      .normalize("NFD").replace(/\p{Diacritic}/gu,"");
     return keys.find(k => pats.some(p => norm(k).includes(p)));
   }
 
   // ====== Scan Handling ======
-  function scheduleAutoCommit(){ if (scanTimer) clearTimeout(scanTimer); scanTimer = setTimeout(() => { autoCommit(); }, AUTOCOMMIT_IDLE_MS); }
+  function scheduleAutoCommit(){
+    if (scanTimer) clearTimeout(scanTimer);
+    scanTimer = setTimeout(() => { autoCommit(); }, AUTOCOMMIT_IDLE_MS);
+  }
+
   function autoCommit(){
     const code = (el.scanInput.value || "").trim();
     if (code.length >= MIN_LEN_FOR_COMMIT){
@@ -219,15 +277,21 @@
 
   function processScan(code){
     const clean = String(code || "").trim();
-    if (!clean){ flash("err"); return; }
+    if (!clean){
+      flash("err");
+      return;
+    }
     const k = key(clean);
     const hit = byCode.has(k);
     scans.unshift({ code: clean, ok: hit, time: new Date().toISOString() });
     scans = scans.slice(0, 5000);
     if (!hit){
-      flash("err"); beepError(); note(`No encontrado: ${clean}`);
+      flash("err");
+      beepError();
+      note(`No encontrado: ${clean}`);
     } else {
-      flash("ok"); note(`OK: ${clean}`);
+      flash("ok");
+      note(`OK: ${clean}`);
     }
     renderLast();
   }
@@ -240,7 +304,9 @@
     setTimeout(() => el.scanInput.classList.remove(kind), 220);
   }
 
-  function note(msg){ if (el.noti) el.noti.textContent = msg; }
+  function note(msg){
+    if (el.noti) el.noti.textContent = msg;
+  }
 
   function renderLast(){
     if (!el.lastScans) return;
@@ -276,8 +342,8 @@
     // 1) Descarga local
     downloadString(content, fnameBase);
 
-    // 2) Enviar copia al Google Drive vía Apps Script según ORIGEN
-    const folderName = (el.destinoSelect?.value || "INVENTARIO").toString().toUpperCase();
+    // 2) Enviar copia al Google Drive vía Apps Script según SUCURSAL DE ENTRADA
+    const folderName = (el.sucursalEntradaSelect?.value || "RECEPCION").toString().toUpperCase();
     enviarArchivoAGoogleDrive({
       content: content,
       fileName: fnameBase,
@@ -285,7 +351,8 @@
     });
   }
 
-  // Formato: YYMMDD DESTINO RESPONSABLE NB REM<REMITO>.txt
+  // Formato RECEPCIÓN:
+  // YYMMDD <SUC_ENTRADA> <RESP_ENTRADA> <BULTOS>B REM<REMITO_ORIGEN> OK.txt
   function resolveFilename(){
     const now = new Date();
     const yy = String(now.getFullYear()).slice(-2);
@@ -293,34 +360,34 @@
     const dd = String(now.getDate()).padStart(2,"0");
     const FECHA = `${yy}${mm}${dd}`;
 
-    const DESTINO = safeName((el.destinoSelect?.value || "").toUpperCase());
-    const RESPONSABLE = safeName((el.respSelect?.value || "").toUpperCase());
+    const SUC_ENTRADA = safeName((el.sucursalEntradaSelect?.value || "").toUpperCase());
+    const RESP_ENTRADA = safeName((el.respEntradaSelect?.value || "").toUpperCase());
     const BULTOS = (el.bultosInput?.value || "0");
-    const REMITO = (el.remitoInput?.value || "");
+    const REM_ORIGEN = (el.remitoOrigenInput?.value || "");
 
-    let base = `${FECHA} ${DESTINO} ${RESPONSABLE} ${BULTOS}B REM${REMITO} OK`;
+    let base = `${FECHA} ${SUC_ENTRADA} ${RESP_ENTRADA} ${BULTOS}B REM${REM_ORIGEN} OK`;
     base = base.trim();
     return ensureTxt(sanitize(base));
   }
 
   // ====== Envío a Apps Script (Google Drive) ======
- function getScriptUrlForOrigen(origen){
-  const o = String(origen || "").toUpperCase().trim();
+  function getScriptUrlForSucursal(sucursal){
+    const o = String(sucursal || "").toUpperCase().trim();
 
-  if (o === "SARMIENTO") return SCRIPT_URL_SARMIENTO;
-  if (o === "AV2")       return SCRIPT_URL_AV2;
-  if (o === "PUEYRREDON") return SCRIPT_URL_PUEYRREDON;
+    if (o === "SARMIENTO")   return SCRIPT_URL_SARMIENTO;
+    if (o === "AV2")         return SCRIPT_URL_AV2;
+    if (o === "PUEYRREDON")  return SCRIPT_URL_PUEYRREDON;
 
-  // Si aún no hay script asignado para otros locales:
-  return "";
-}
+    // Si aún no hay script asignado para otros locales:
+    return "";
+  }
 
   function enviarArchivoAGoogleDrive({ content, fileName, folderName }){
-    const origen = el.origenSelect?.value || "";
-    const scriptUrl = getScriptUrlForOrigen(origen);
+    const sucursal = el.sucursalEntradaSelect?.value || "";
+    const scriptUrl = getScriptUrlForSucursal(sucursal);
 
     if (!scriptUrl){
-      console.warn("No hay SCRIPT_URL configurada para el origen:", origen);
+      console.warn("No hay SCRIPT_URL configurada para la sucursal de entrada:", sucursal);
       return;
     }
 
@@ -344,7 +411,7 @@
         "Archivo enviado a Apps Script para guardar en Drive:",
         fileName,
         "=> carpeta", folderName,
-        "ORIGEN:", origen
+        "SUCURSAL ENTRADA:", sucursal
       );
     } catch (err) {
       console.error("Error al enviar a Apps Script:", err);
@@ -352,16 +419,27 @@
   }
 
   // ====== Helpers ======
-  function ensureTxt(name){ return name.toLowerCase().endsWith(".txt") ? name : `${name}.txt`; }
-  function sanitize(s){ return s.replace(/[\\/:*?"<>|]+/g, "_"); } // mantiene espacios/acentos
-  function safeName(s){ return s.normalize("NFC"); }
+  function ensureTxt(name){
+    return name.toLowerCase().endsWith(".txt") ? name : `${name}.txt`;
+  }
+
+  function sanitize(s){
+    return s.replace(/[\\/:*?"<>|]+/g, "_"); // mantiene espacios/acentos
+  }
+
+  function safeName(s){
+    return s.normalize("NFC");
+  }
 
   function downloadString(content, fname){
     const blob = new Blob([content], {type: "text/plain;charset=utf-8"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = fname;
-    document.body.appendChild(a); a.click(); a.remove();
+    a.href = url;
+    a.download = fname;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
     URL.revokeObjectURL(url);
   }
 
@@ -376,8 +454,13 @@
     const headers = rawHeaders.map(h => {
       let k = String(h || "").trim();
       if (!k) k = "COL";
-      if (seen[k]) { let n = 2; while (seen[`${k}_${n}`]) n++; k = `${k}_${n}`; }
-      seen[k] = true; return k;
+      if (seen[k]) {
+        let n = 2;
+        while (seen[`${k}_${n}`]) n++;
+        k = `${k}_${n}`;
+      }
+      seen[k] = true;
+      return k;
     });
     const out = [];
     for (let i=1;i<lines.length;i++){
@@ -395,8 +478,13 @@
       let q=false, n=0;
       for(let i=0;i<line.length;i++){
         const c=line[i], nxt=line[i+1];
-        if (c === '"'){ if(q && nxt === '"'){ i++; } else { q=!q; } }
-        else if (!q && c === ch){ n++; }
+        if (c === '"'){
+          if(q && nxt === '"'){ i++; }
+          else { q=!q; }
+        }
+        else if (!q && c === ch){
+          n++;
+        }
       }
       return n;
     };
@@ -407,11 +495,14 @@
   }
 
   function splitCSVLine(line, sep){
-    const out = []; let cur=""; let q=false;
+    const out = [];
+    let cur="";
+    let q=false;
     for(let i=0;i<line.length;i++){
       const c=line[i], n=line[i+1];
       if(c === '"'){
-        if(q && n === '"'){ cur+='"'; i++; } else { q=!q; }
+        if(q && n === '"'){ cur+='"'; i++; }
+        else { q=!q; }
       } else if(c === sep && !q){
         out.push(cur); cur="";
       } else {
@@ -423,12 +514,27 @@
   }
 
   // ====== Otros helpers visuales ======
-  function slug(s){ return (s||"").toString().normalize("NFD").replace(/\p{Diacritic}/gu,"").replace(/[^\w\-]+/g,"_").replace(/_+/g,"_").replace(/^_|_$/g,""); }
-  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, (m) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m])); }
+  function slug(s){
+    return (s||"").toString()
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu,"")
+      .replace(/[^\w\-]+/g,"_")
+      .replace(/_+/g,"_")
+      .replace(/^_|_$/g,"");
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, (m) =>
+      ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m])
+    );
+  }
+
   function showPill(state, text){
     if(!el.readyPill) return;
     el.readyPill.classList.remove("hidden","ok","warn","danger");
     el.readyPill.classList.add(state || "ok");
-    if(el.pillText) el.pillText.textContent = text || (state === "ok" ? "Listo para pickear" : "Estado");
+    if(el.pillText) {
+      el.pillText.textContent = text || (state === "ok" ? "Listo para recibir" : "Estado");
+    }
   }
 })();
